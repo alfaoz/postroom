@@ -1,6 +1,6 @@
 # Postroom — Implementation State
 
-**Last updated:** batch 5 complete (private domain server + install ceremony)
+**Last updated:** batch 6 complete (N.N.A. staff terminal)
 **Conversation context:** Design and partial build by an earlier Claude (foundation libraries). Implementation continued by Claude Code.
 
 ## 1. Quick status
@@ -13,7 +13,7 @@
 | `NMAIL_SRV` / `COMMON_SRV` mail servers | ✅ Complete and tested (60/60 tests passing) |
 | `PR` mail client | ✅ Complete (6/6 smoke tests passing) |
 | Generic domain server + installer floppy | ✅ Complete (29/29 tests passing) |
-| `NNA_STAFF` terminal | ⏳ Not started |
+| `NNA_STAFF` terminal | ✅ Complete (7/7 smoke tests passing) |
 | Final installer scripts (6 pastebins) | ⏳ Not started |
 | Visual / graphics-mode UI layer | ⏳ Explicitly deferred to a separate phase after the system works in text mode |
 
@@ -288,11 +288,26 @@ After reboot the domain server runs as a normal mail server federating with the 
 
 Tests: `tests/install_test.lua` (29 assertions) — pure helpers (`buildConfig`, `buildInitialState`, `buildStartup`, `verifySources`) verified for shape, plus module load smoke checks. The interactive parts (rednet lookup, floppy read, reboot) are tested end-to-end in CraftOS-PC.
 
-### Batch 6: `src/nna_staff.lua` — Staff terminal (~500 lines)
+### ~~Batch 6: N.N.A. staff terminal~~ ✅ Done
 
-The clerk's workstation at the N.N.A. office. Staff login, main menu, all counter operations: new registration, renewal, transfer, revocation, domain lookup, audit query. Writes install floppies. Prints certificates and receipts.
+`src/nna_staff.lua` (603 lines). Office-closed screen until login; main menu has the eight standard operations:
 
-**Office-closed screen** when no staff is logged in.
+1. New domain registration — collects applicant + op fields, calls `register_domain`, writes the install floppy via the disk drive (`disk/postroom_install`), prints certificate + receipt
+2. Process renewal — `renew_domain`, prints renewal receipt
+3. Domain transfer — `transfer_domain` with a fresh op password hash; prints handover slip with the new temp password
+4. Look up domain — fetches via `list_domains` and shows full record
+5. Browse all domains — colored by status (REVOKED red, SUSPENDED yellow, PENDING_INSTALL gray)
+6. Revoke domain — admin-only, requires `CONFIRM`, calls `revoke_domain`
+7. Today's activity — `audit_query` since today's day
+8. Audit log — `audit_query` with optional since-day and action-kind filters
+
+**Auth:** signed with the staff terminal's per-machine secret (32-byte hex) at `/postroom/staff_secret`. On first run the terminal prompts to paste the secret printed by the registry on its own first boot. Once paired, every request to the registry is HMAC-signed with that secret + the staff session token returned by `staff_login`.
+
+**Office-closed handling:** when no staff session is active, terminal shows the closed screen. Routine operations on the registry (heartbeats, lifecycle ticks, mail routing) keep running on `NNA_REG` regardless — the terminal only gates *staff actions*.
+
+**Peripherals:** wireless modem (mandatory), disk drive (mandatory for floppy writes), printer (mandatory for cert/receipt printing). The flow degrades gracefully — if the printer is missing the registration still completes, just with a warning.
+
+Tests: `tests/nna_staff_test.lua` is a smoke test (module load + public-API surface). Real testing is end-to-end in CraftOS-PC.
 
 ### Final: 6 installer scripts (~80 lines each)
 
