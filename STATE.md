@@ -1,6 +1,6 @@
 # Postroom — Implementation State
 
-**Last updated:** batch 3 complete (mail server core + @nmail/@common wrappers)
+**Last updated:** batch 4 complete (PR client)
 **Conversation context:** Design and partial build by an earlier Claude (foundation libraries). Implementation continued by Claude Code.
 
 ## 1. Quick status
@@ -11,7 +11,7 @@
 | Foundation libraries | ✅ Complete and tested (133/133 tests passing) |
 | `NNA_REG` registry server | ✅ Complete and tested (67/67 tests passing) |
 | `NMAIL_SRV` / `COMMON_SRV` mail servers | ✅ Complete and tested (60/60 tests passing) |
-| `PR` mail client | ⏳ Not started |
+| `PR` mail client | ✅ Complete (6/6 smoke tests passing) |
 | Generic domain server + installer floppy | ⏳ Not started |
 | `NNA_STAFF` terminal | ⏳ Not started |
 | Final installer scripts (6 pastebins) | ⏳ Not started |
@@ -249,20 +249,24 @@ Six remaining batches, in this order:
 
 **System accounts** (op, pm, abuse, noreply) are seeded on first boot via `ensureSystemAccounts()`. The op account's password is set during install (batch 5) — for the public servers, the operator sets it manually in the registry's bootstrap flow (TBD in batch 6 staff terminal, or via a CLI helper before then).
 
-### Batch 4: `src/pr_client.lua` — The mail client (~600 lines)
+### ~~Batch 4: PR client~~ ✅ Done
 
-The user-facing app. Text-mode only for now. Boot, login/register, inbox, read, compose, reply, delete. Domain admin views for `op@<domain>` accounts.
+`src/pr_client.lua` (718 lines), text-mode only per §11 (graphics deferred to phase 8).
 
-**State machine:**
-```
-unauthenticated → login → main inbox view
-                         ↓ ↑
-              compose / read / folder switch / settings
-                         ↓
-              (op-only) admin overlay: users, branding, stats
-```
+**Flow:** boot → login (sign in / create account / quit) → inbox loop. Inbox screen has key-driven menu: digit reads message N, `c` compose, `r` refresh, `i/s/t` switch folders (inbox/sent/trash), `/` search, `a` admin overlay (op only), `l` logout, `q` quit. Read view supports `r` reply (with quoted original), `d` delete, `q` back. Compose accepts comma-separated `to:`, subject, multi-line body terminated by a single `.` on its own line.
 
-Polls `list_inbox` every 15 sec for new mail.
+**Op admin overlay:** create/delete/reset users, view a user's inbox, update branding, see domain stats. Visible only when `account_info` returns `is_op=true`.
+
+**Persistence:** `/postroom/client.txt` holds `session` and `remembered_servers` only (cache stays in memory, per §4.4). Login auto-suggests up to 5 remembered addresses.
+
+**Auth on the wire:**
+- `domain_status`, `list_public_domains`: signed with `"PUBLIC"`
+- `register`, `login`: payload-only — server signs response with `"PUBLIC"` (per the dispatch refinement in this batch); client passes `"PUBLIC"` to `wire.sendRequest` so it can verify
+- All other USR actions: HMAC keyed on `session_token`
+
+**No background polling in v1.** The user presses `r` to refresh. Adding a parallel timer + read loop is straightforward later but adds enough complexity (CC's `parallel.waitForAny` on `read()` is awkward) that I've left it out for now. Easy to revisit when we polish the UI in phase 8.
+
+**Tests:** `tests/pr_client_test.lua` is a smoke test only. The client is interactive UI; meaningful tests need to drive it end-to-end against running registry + mail servers in CraftOS-PC.
 
 ### Batch 5: `src/domain_srv.lua` and `src/install_disk.lua` (~400 lines)
 

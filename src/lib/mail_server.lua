@@ -996,14 +996,12 @@ function M.dispatch(req)
 
   if req.proto == "POSTROOM/USR" then
     if UNSIGNED_USR[action] then
-      -- Pre-session: no sig check, no nonce store usage
+      -- Pre-session: no sig check, no nonce store usage. Response is signed
+      -- with the well-known "PUBLIC" sentinel so the client can verify it
+      -- without already knowing the session token. The session token is in
+      -- the response data; the client uses it for subsequent requests.
       local rok, rdata = h(req.payload or {}, { kind = "USR", request = req }, req)
-      -- Sign response with the new session token (if any) so the client can verify.
-      local respSecret = nil
-      if rok and rdata and rdata.session_token then
-        respSecret = rdata.session_token
-      end
-      return rok, rdata, { sign_with = respSecret }
+      return rok, rdata, { sign_with = "PUBLIC" }
     end
     -- Authenticated USR: HMAC keyed on session token
     local token = req.payload and req.payload.session_token
