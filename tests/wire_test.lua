@@ -1,5 +1,5 @@
 -- Test wire.lua
-package.path = package.path .. ";../src/lib/?.lua"
+package.path = package.path .. ";../src/lib/?.lua;./src/lib/?.lua"
 local wire = require("wire")
 local crypto = require("crypto")
 

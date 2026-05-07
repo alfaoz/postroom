@@ -1,5 +1,5 @@
 -- Test common.lua
-package.path = package.path .. ";../src/lib/?.lua"
+package.path = package.path .. ";../src/lib/?.lua;./src/lib/?.lua"
 local C = require("common")
 
 local total, failed = 0, 0

@@ -2,7 +2,7 @@
 -- Run: lua crypto_test.lua  (or paste into a CC computer alongside crypto.lua)
 -- Verifies SHA256, HMAC-SHA256, and AES-128-CBC against known-answer tests.
 
-package.path = package.path .. ";../src/lib/?.lua"
+package.path = package.path .. ";../src/lib/?.lua;./src/lib/?.lua"
 local crypto = require("crypto")
 
 local total, failed = 0, 0
