@@ -8,7 +8,7 @@ Postroom is a multi-server mail system for an in-game Minecraft world. It models
 
 ## Status
 
-🚧 **In active development.** See [`STATE.md`](./STATE.md) for current implementation progress.
+✅ **v1 feature-complete.** All six batches plus the pastebin installer phase are done. 314/314 tests passing across nine suites. End-to-end testing in CraftOS-PC and final pastebin uploads are the remaining steps. See [`STATE.md`](./STATE.md) for the full per-component status.
 
 ## Documentation
 
@@ -36,7 +36,16 @@ Plus client computers running the **PR client** (the mail app).
 
 Cryptography is HMAC-SHA256 for authentication and AES-128-CBC for body encryption. Both are implemented in pure Lua and verified against published test vectors.
 
-## Project layout (target)
+## Deploying
+
+1. **Run the registry first.** Pastebin upload `installers/install_registry.lua`, then on a fresh CC computer with a wireless modem: `pastebin get <id> install && install && reboot`. On the next boot the registry prints two things: a 64-character staff terminal secret (you'll paste this into the staff terminal in step 2), and the bootstrap admin credentials (`admin / changeme`).
+2. **Set up the staff terminal.** Pastebin `installers/install_staff.lua`. On a CC computer with a wireless modem, disk drive, and printer: `pastebin get <id> install && install && reboot`. On first boot the terminal asks for the staff secret you wrote down.
+3. **Register `@nmail` and `@common`** at the staff terminal (operator name = "N.N.A.", op_username = "op"). Take each install floppy to its public-server CC computer.
+4. **Run the public server installers.** `pastebin get <id> install && install` for `install_nmail.lua` / `install_common.lua` — these include the install ceremony inline.
+5. **For each private domain customer**, register them at the staff terminal, hand them the floppy, and have them run `install_domain.lua` on their own CC computer.
+6. **Players install the client** with `install_client.lua` and run `pr` to launch it.
+
+## Project layout
 
 ```
 postroom/
@@ -46,21 +55,28 @@ postroom/
 ├── HANDOFF_PROMPT.md
 ├── src/
 │   ├── lib/
-│   │   ├── crypto.lua       ✓ done
-│   │   ├── wire.lua         ✓ done
-│   │   └── common.lua       ✓ done
-│   ├── nna_reg.lua          ✗ pending (batch 2)
-│   ├── nmail_srv.lua        ✗ pending (batch 3)
-│   ├── common_srv.lua       ✗ pending (batch 3)
-│   ├── pr_client.lua        ✗ pending (batch 4)
-│   ├── domain_srv.lua       ✗ pending (batch 5)
-│   ├── install_disk.lua     ✗ pending (batch 5)
-│   └── nna_staff.lua        ✗ pending (batch 6)
-├── tests/
-│   ├── crypto_test.lua      ✓ done — 31/31 passing
-│   ├── wire_test.lua        ✓ done — 50/50 passing
-│   └── common_test.lua      ✓ done — 52/52 passing
-└── installers/              ✗ pending (final phase)
+│   │   ├── crypto.lua          SHA-256 / HMAC / AES-128-CBC / passwords
+│   │   ├── wire.lua            canonical serialization + signing + replay
+│   │   ├── common.lua          constants, validators, persistence, UI
+│   │   └── mail_server.lua     shared core for all three mail-server roles
+│   ├── nna_reg.lua             registry + lifecycle tick
+│   ├── nmail_srv.lua           @nmail public server (thin wrapper)
+│   ├── common_srv.lua          @common public server (thin wrapper)
+│   ├── domain_srv.lua          generic private domain server
+│   ├── install_disk.lua        floppy bootstrap (consume install token)
+│   ├── pr_client.lua           PR mail client (text-mode UI)
+│   └── nna_staff.lua           N.N.A. office counter terminal
+├── tests/                      314/314 passing
+│   ├── crypto_test.lua            31  FIPS / RFC vectors
+│   ├── wire_test.lua              50  serialization, signing, replay
+│   ├── common_test.lua            52  validators, persistence, UI
+│   ├── nna_reg_test.lua           67  dispatch, handlers, daily tick
+│   ├── mail_server_test.lua       60  USR + REG action coverage
+│   ├── pr_client_test.lua          6  smoke
+│   ├── install_test.lua           29  installer pure helpers
+│   ├── nna_staff_test.lua          7  smoke
+│   └── installers_test.lua        12  syntax + URL checks for pastebins
+└── installers/
     ├── install_registry.lua
     ├── install_nmail.lua
     ├── install_common.lua

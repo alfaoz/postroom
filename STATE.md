@@ -1,6 +1,6 @@
 # Postroom — Implementation State
 
-**Last updated:** batch 6 complete (N.N.A. staff terminal)
+**Last updated:** all 6 batches + final installer phase complete — system is feature-complete, ready for end-to-end testing in CraftOS-PC
 **Conversation context:** Design and partial build by an earlier Claude (foundation libraries). Implementation continued by Claude Code.
 
 ## 1. Quick status
@@ -14,7 +14,7 @@
 | `PR` mail client | ✅ Complete (6/6 smoke tests passing) |
 | Generic domain server + installer floppy | ✅ Complete (29/29 tests passing) |
 | `NNA_STAFF` terminal | ✅ Complete (7/7 smoke tests passing) |
-| Final installer scripts (6 pastebins) | ⏳ Not started |
+| Final installer scripts (6 pastebins) | ✅ Complete (12/12 syntax + URL tests passing) |
 | Visual / graphics-mode UI layer | ⏳ Explicitly deferred to a separate phase after the system works in text mode |
 
 ## 2. What exists right now
@@ -309,11 +309,27 @@ Tests: `tests/install_test.lua` (29 assertions) — pure helpers (`buildConfig`,
 
 Tests: `tests/nna_staff_test.lua` is a smoke test (module load + public-API surface). Real testing is end-to-end in CraftOS-PC.
 
-### Final: 6 installer scripts (~80 lines each)
+### ~~Final: 6 installer scripts~~ ✅ Done
 
-After the system works end-to-end, produce six dedicated installer pastes (one per role). Each fetches its files from the GitHub raw URL hardcoded in the script. Plus an `update` command for in-place updates.
+`installers/install_*.lua` — six standalone scripts ready for pastebin upload. Each hardcodes `https://raw.githubusercontent.com/alfaoz/postroom/main` as its source base, fetches the right files for its role via `http.get`, lays them out under `/postroom/`, and writes the appropriate `/startup.lua` (or `/pr.lua` for the client).
 
-The user uploads each installer once to pastebin; from then on, deploying a new computer is a single `pastebin get <id> install && install` command.
+| Installer | Role | Files fetched | Includes install ceremony? |
+|---|---|---|---|
+| `install_registry.lua` | NNA_REG | crypto/wire/common/nna_reg | no (registry self-bootstraps) |
+| `install_nmail.lua` | NMAIL_SRV | + mail_server, nmail_srv | yes (consumes @nmail floppy inline) |
+| `install_common.lua` | COMMON_SRV | + mail_server, common_srv | yes (consumes @common floppy inline) |
+| `install_domain.lua` | private | + mail_server, domain_srv, install_disk | yes (generic — uses floppy's domain) |
+| `install_client.lua` | client | crypto/wire/common/pr_client | no (writes /pr.lua launcher) |
+| `install_staff.lua` | NNA_STAFF | crypto/wire/common/nna_staff | no (terminal prompts for secret on first boot) |
+
+All six support `update` mode for in-place source refresh that doesn't touch existing state. The three with install ceremonies (nmail/common/domain) inline the entire token-consume + state-write flow so the user runs ONE pastebin command and gets a working server.
+
+Tests: `tests/installers_test.lua` — 12 assertions (loadfile syntax check + GitHub raw URL presence). End-to-end install testing happens in CraftOS-PC.
+
+**To deploy:**
+1. Push the repo to GitHub (already done at https://github.com/alfaoz/postroom).
+2. Upload each installer to pastebin once. Note the six paste IDs.
+3. On any fresh CC computer with HTTP enabled and the right peripherals, run `pastebin get <id> install && install`.
 
 ## 4. Conventions and decisions
 
