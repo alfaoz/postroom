@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# Editor
+*.swp
+*~
+.vscode/
+.idea/
+
+# Lua
+*.luac
+
+# Local working state (CC dev only)
+/postroom/
+*.tmp
