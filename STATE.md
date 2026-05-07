@@ -1,7 +1,7 @@
 # Postroom — Implementation State
 
-**Last updated:** end of design conversation, batch 1 complete
-**Conversation context:** A design and partial-build conversation with a previous Claude. This document captures exactly where we left off.
+**Last updated:** batch 2 complete (NNA_REG registry server)
+**Conversation context:** Design and partial build by an earlier Claude (foundation libraries). Implementation continued by Claude Code.
 
 ## 1. Quick status
 
@@ -9,7 +9,7 @@
 |---|---|
 | Design specification | ✅ Complete (`DESIGN.md`) |
 | Foundation libraries | ✅ Complete and tested (133/133 tests passing) |
-| `NNA_REG` registry server | ⏳ Not started (next batch) |
+| `NNA_REG` registry server | ✅ Complete and tested (67/67 tests passing) |
 | `NMAIL_SRV` / `COMMON_SRV` mail servers | ⏳ Not started |
 | `PR` mail client | ⏳ Not started |
 | Generic domain server + installer floppy | ⏳ Not started |
@@ -197,23 +197,31 @@ C.selectFromList(items, labelFn, title, allowBack) -> item, idx
 
 Six remaining batches, in this order:
 
-### Batch 2: `src/nna_reg.lua` — Registry server (~700 lines)
+### ~~Batch 2: `src/nna_reg.lua` — Registry server~~ ✅ Done
 
-The central authority. Holds the domain registry, install tokens, staff accounts, audit log, billing log. Routes mail between domain servers. Runs the daily lifecycle tick.
+`src/nna_reg.lua` (921 lines) + `tests/nna_reg_test.lua` (67 tests).
 
-**Implements these actions** (see `DESIGN.md` § 3.3 for full specs):
+**Implemented actions:**
 - Server-bound: `heartbeat`, `route_mail`, `consume_install_token`, `update_branding`
-- Server-issued: `deliver_mail`, `notify_revoked`, `notify_renewal`, `notify_suspended`
-- Staff-bound: `staff_login`, `staff_logout`, `register_domain`, `renew_domain`, `transfer_domain`, `revoke_domain`, `list_domains`, `audit_query`
-- Public: `domain_status`, `list_public_domains`
+- Server-issued (called from registry to domain servers): `deliver_mail` (via `notifyServer`), `notify_revoked`, `notify_renewal`, `notify_suspended`
+- Staff-bound: `staff_login`, `staff_logout`, `register_domain`, `renew_domain`, `transfer_domain`, `revoke_domain`, `list_domains`, `list_pending_apps`, `audit_query`
+- Public (unsigned): `domain_status`, `list_public_domains`
 
-**State persisted to disk:** `domains[]`, `install_tokens[]`, `staff_accounts[]`, `staff_sessions[]`, `reserved_names[]`, `public_domains[]`, `audit_log[]`, `billing_log[]`, `counters{}`. See `DESIGN.md` § 4.1 for full data model.
+**State persisted at `/postroom/state.txt`** with the shape from `DESIGN.md` § 4.1.
 
-**Critical implementation notes:**
-- Daily tick must be **idempotent** — running it twice produces same result.
-- Heartbeat tracking: a domain is "online" if `now - last_heartbeat_at < 180_000` ms (3 min).
-- The registry holds the secret to verify each domain server's HMAC. When forwarding `deliver_mail`, the registry signs with the *destination's* secret.
-- `route_mail` payload includes the encrypted body; the registry never decrypts it. It just forwards.
+**Module shape:** the file is a Lua module returning `M`. `M.dispatch(req)` is the test-friendly entry point — it validates, verifies HMAC, checks the nonce store, and routes to a handler. `M.run()` is the rednet main loop. The bottom of the file calls `M.run()` automatically unless `_G._POSTROOM_NO_AUTORUN = true` is set first (used by tests).
+
+**Routing/encryption decision (resolves design ambiguity):** for cross-domain mail the registry **decrypts the body with the sender's domain secret and re-encrypts with the destination's secret** before calling `deliver_mail`. This matches `DESIGN.md` § 5.5's per-message-id key derivation. The registry seeing bodies in transit is an accepted limitation per § 5.9. Earlier `STATE.md` text saying "the registry never decrypts" was incorrect — that wording would only be true with per-pair derived keys, which were explicitly deferred.
+
+**Auth model details:**
+- Domain server → registry: HMAC keyed on the domain's `shared_secret`. Sender station name (`<UPPERDOMAIN>_SRV`) selects the secret.
+- Staff terminal → registry: HMAC keyed on a single staff-terminal secret stored at `/postroom/staff_secret` (auto-generated on first boot, printed once). Plus a `session_token` in the payload identifies which staff member is logged in.
+- `consume_install_token`: special — the install token *itself* is the HMAC key for that one bootstrap call, since the new computer has no shared secret yet. Once consumed, the token route is disabled (status flips to CONSUMED).
+- Public actions (`domain_status`, `list_public_domains`): unsigned. Responses are signed with the sentinel string `"PUBLIC"`; clients should not verify these.
+
+**Daily tick:** runs `M.dailyTick()` on boot and then every 30 s of wall time (`M.MAIN_TICK_INTERVAL`). Idempotent on `state.last_tick_day`. Handles renewal warnings at -4/-2/0 days, ACTIVE→SUSPENDED at +grace, SUSPENDED→REVOKED at +30 days, install-token expiry, and revoked-domain purge after 60 days.
+
+**Bootstrap admin:** on first boot the registry creates a default `admin / changeme` staff account (logged in audit). Change immediately.
 
 ### Batch 3: `src/nmail_srv.lua` and `src/common_srv.lua` (~700 lines combined)
 
