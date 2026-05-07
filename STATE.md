@@ -1,6 +1,6 @@
 # Postroom — Implementation State
 
-**Last updated:** batch 2 complete (NNA_REG registry server)
+**Last updated:** batch 3 complete (mail server core + @nmail/@common wrappers)
 **Conversation context:** Design and partial build by an earlier Claude (foundation libraries). Implementation continued by Claude Code.
 
 ## 1. Quick status
@@ -10,7 +10,7 @@
 | Design specification | ✅ Complete (`DESIGN.md`) |
 | Foundation libraries | ✅ Complete and tested (133/133 tests passing) |
 | `NNA_REG` registry server | ✅ Complete and tested (67/67 tests passing) |
-| `NMAIL_SRV` / `COMMON_SRV` mail servers | ⏳ Not started |
+| `NMAIL_SRV` / `COMMON_SRV` mail servers | ✅ Complete and tested (60/60 tests passing) |
 | `PR` mail client | ⏳ Not started |
 | Generic domain server + installer floppy | ⏳ Not started |
 | `NNA_STAFF` terminal | ⏳ Not started |
@@ -223,16 +223,31 @@ Six remaining batches, in this order:
 
 **Bootstrap admin:** on first boot the registry creates a default `admin / changeme` staff account (logged in audit). Change immediately.
 
-### Batch 3: `src/nmail_srv.lua` and `src/common_srv.lua` (~700 lines combined)
+### ~~Batch 3: mail server core + public wrappers~~ ✅ Done
 
-The two public mail servers. They are nearly identical — same code, different config (domain name, branding, server station ID). It's reasonable to write them as **one shared `mail_server.lua`** that loads its `domain_meta` from a config file, then have `nmail_srv.lua` and `common_srv.lua` be tiny wrappers that set the config.
+`src/lib/mail_server.lua` (1090 lines) is the shared core. `src/nmail_srv.lua` and `src/common_srv.lua` are thin wrappers (~20 lines each) that call `mail_server.run({ ... })` with their domain config. The same core is what batch 5's private domain server will use with `is_public_server = false`.
 
-**Implements** (`DESIGN.md` § 3.4 actions, mostly):
-- User-bound: `register`, `login`, `logout`, `change_password`, `account_info`, `list_inbox`, `read_message`, `mark_read`, `delete_message`, `send`, `search`, `list_local_users`
-- Registry-bound: `deliver_mail` (receiving routed mail), `notify_revoked`, etc.
-- Heartbeat sender (every 60s)
+**Implemented actions:**
+- USR (client-facing): `register`, `login`, `logout`, `change_password`, `account_info`, `list_inbox`, `read_message`, `mark_read`, `delete_message`, `send`, `search`, `list_local_users`
+- USR (op-only): `admin_create_user`, `admin_delete_user`, `admin_reset_password`, `admin_view_user_inbox`, `admin_view_message`, `admin_set_branding`, `admin_domain_stats`
+- REG (server-bound, sent from registry): `deliver_mail`, `notify_revoked`, `notify_renewal`, `notify_suspended`, `admin_op_reset` (transfer)
+- Heartbeat sent every 60 s; trash auto-purge every day at first tick
 
-Public domains have **self-registration enabled** (`is_public_server = true` in `domain_meta`). Private domain servers will reuse this code with `is_public_server = false`.
+**Auth model (POSTROOM/USR):**
+- `register` and `login` are unsigned (no session yet). Server validates the payload; on success, response is signed with the new session token so the client can verify.
+- All other USR actions: HMAC keyed on the **session token**. Client and server both hold the token; replay-protected via the nonce store.
+
+**Auth model (POSTROOM/REG):**
+- All inbound from registry is signed with this server's `shared_secret`, station must equal `registry_station` (default `NNA_REG`).
+- Outbound (heartbeat, route_mail, update_branding) is signed with the same secret.
+
+**Body encryption on routing:** sender mail server AES-encrypts the body with `crypto.encrypt(body, shared_secret, "mail:<msg_id>")` and passes it to the registry's `route_mail`. The registry decrypts with the sender's secret and re-encrypts with the destination's secret before calling `deliver_mail`. The destination decrypts with its own secret using the same `mail:<msg_id>` context. Plaintext bodies are stored at rest on each mail server (no benefit to encrypting at rest within the same machine).
+
+**Sessions:** 7-day TTL refreshed on every authenticated request. Max 3 concurrent sessions per user; oldest evicted on a 4th login. `admin_reset_password` and `admin_op_reset` invalidate the target's sessions.
+
+**Bouncing:** any per-recipient outcome that isn't `DELIVERED` or `LOCAL` produces a system message from `pm@<this_domain>` in the original sender's inbox (if the sender is local). Bounces never bounce.
+
+**System accounts** (op, pm, abuse, noreply) are seeded on first boot via `ensureSystemAccounts()`. The op account's password is set during install (batch 5) — for the public servers, the operator sets it manually in the registry's bootstrap flow (TBD in batch 6 staff terminal, or via a CLI helper before then).
 
 ### Batch 4: `src/pr_client.lua` — The mail client (~600 lines)
 
