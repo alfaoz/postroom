@@ -206,12 +206,21 @@ local ok, err = R.dispatch(req)
 check("register: dup rejected", false, ok)
 check("register: dup => DOMAIN_TAKEN", "DOMAIN_TAKEN", err)
 
--- reserved name
+-- Admin can register issuable-by-NNA names (gov, nna, nta, nga, nmail, common)
 local req = build("NNA_STAFF", "register_domain",
-  { session_token = sessTok, domain_name = "gov",
+  { session_token = sessTok, domain_name = "nmail",
+    applicant_realname = "N.N.A.", op_username = "op" }, STAFF_SECRET)
+local ok, data = R.dispatch(req)
+check("register: admin can register @nmail", true, ok)
+check("register: @nmail in state", "PENDING_INSTALL",
+      R.state.domains["nmail"].status)
+
+-- Even admin can't register a never-issuable reserved name
+local req = build("NNA_STAFF", "register_domain",
+  { session_token = sessTok, domain_name = "nhsa",
     applicant_realname = "X", op_username = "y" }, STAFF_SECRET)
-local ok = R.dispatch(req)
-check("register: reserved name rejected", false, ok)
+local ok, err = R.dispatch(req)
+check("register: never-issuable name rejected even for admin", false, ok)
 
 -- ===== consume_install_token =====
 

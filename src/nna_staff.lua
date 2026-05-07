@@ -227,17 +227,21 @@ local function newRegistration(staffSecret)
   print("")
   local applicant = C.askNonEmpty("Applicant real name (player name)")
 
+  -- Admin staff can register the N.N.A.-operated public brands
+  -- (gov / nna / nta / nga / nmail / common); regular staff can't.
+  -- Let admin type any name and let the registry be the final gatekeeper.
+  local allowReserved = M.session and M.session.is_admin or false
   local domain
   while true do
     domain = string.lower(C.askNonEmpty("Domain name (no @)"))
-    local okv, e = C.validateDomainName(domain)
+    local okv, e = C.validateDomainName(domain, allowReserved)
     if okv then break else err("Invalid: " .. e) end
   end
 
   local opUser
   while true do
     opUser = string.lower(C.askNonEmpty("Op username (e.g. 'barkeep')"))
-    local oku, e = C.validateUsername(opUser)
+    local oku, e = C.validateUsername(opUser, allowReserved)
     if oku then break else err("Invalid: " .. e) end
   end
 

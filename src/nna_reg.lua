@@ -581,18 +581,26 @@ handlers.staff_logout = function(payload, ctx)
   return true, { ok = true }
 end
 
+-- Names the N.N.A. itself is meant to issue (per DESIGN §0.2 / §8.6). Admin
+-- staff can register these; non-admin staff and customers cannot.
+M.ISSUABLE_BY_ADMIN = {
+  gov = true, nna = true, nta = true, nga = true,
+  nmail = true, common = true,
+}
+
 handlers.register_domain = function(payload, ctx)
   if ctx.kind ~= "STAFF_TERMINAL" then return false, "AUTH_FAILED" end
   local s, err = M.checkStaffSession(payload.session_token)
   if not s then return false, err end
 
   local name = string.lower(C.trim(payload.domain_name or ""))
-  local ok, verr = C.validateDomainName(name)
+  local allowReserved = s.is_admin and M.ISSUABLE_BY_ADMIN[name] or false
+  local ok, verr = C.validateDomainName(name, allowReserved)
   if not ok then return false, "INVALID_DOMAIN:" .. (verr or "") end
   if M.state.domains[name] then return false, "DOMAIN_TAKEN" end
 
   local opUser = string.lower(C.trim(payload.op_username or ""))
-  local oku, uerr = C.validateUsername(opUser)
+  local oku, uerr = C.validateUsername(opUser, allowReserved)
   if not oku then return false, "INVALID_USERNAME:" .. (uerr or "") end
 
   if not payload.applicant_realname or payload.applicant_realname == "" then
