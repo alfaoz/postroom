@@ -1,6 +1,6 @@
 # Postroom — Implementation State
 
-**Last updated:** batch 4 complete (PR client)
+**Last updated:** batch 5 complete (private domain server + install ceremony)
 **Conversation context:** Design and partial build by an earlier Claude (foundation libraries). Implementation continued by Claude Code.
 
 ## 1. Quick status
@@ -12,7 +12,7 @@
 | `NNA_REG` registry server | ✅ Complete and tested (67/67 tests passing) |
 | `NMAIL_SRV` / `COMMON_SRV` mail servers | ✅ Complete and tested (60/60 tests passing) |
 | `PR` mail client | ✅ Complete (6/6 smoke tests passing) |
-| Generic domain server + installer floppy | ⏳ Not started |
+| Generic domain server + installer floppy | ✅ Complete (29/29 tests passing) |
 | `NNA_STAFF` terminal | ⏳ Not started |
 | Final installer scripts (6 pastebins) | ⏳ Not started |
 | Visual / graphics-mode UI layer | ⏳ Explicitly deferred to a separate phase after the system works in text mode |
@@ -268,11 +268,25 @@ Six remaining batches, in this order:
 
 **Tests:** `tests/pr_client_test.lua` is a smoke test only. The client is interactive UI; meaningful tests need to drive it end-to-end against running registry + mail servers in CraftOS-PC.
 
-### Batch 5: `src/domain_srv.lua` and `src/install_disk.lua` (~400 lines)
+### ~~Batch 5: domain server + install ceremony~~ ✅ Done
 
-The generic private domain server (e.g. `@sundown`). Mostly the same code as the public mail servers but with `is_public_server = false`, plus initial bootstrapping from an install floppy.
+**`src/domain_srv.lua`** (47 lines) — thin wrapper. On boot, reads `/postroom/config.txt` (written by the installer), then calls `mail_server.run({ ..., is_public_server = false })`. Bails clearly with a "run the installer first" message if the config or sources are missing.
 
-`install_disk.lua` is the script that runs on a fresh computer when the install floppy is inserted. It reads the install token, calls `consume_install_token` on the registry, sets up the local files, and bootstraps the server.
+**`src/install_disk.lua`** (~290 lines) — the install ceremony. Run on a fresh CC computer with the install floppy inserted. Steps:
+
+1. Verify required source files exist at `/postroom/lib/*` and `/postroom/domain_srv.lua`. (Final phase: a pastebin'd installer fetches these from GitHub raw before invoking this script.)
+2. Locate the install metadata at `disk/postroom_install` (also tries `disk1`/`disk2`/`disk3` for multi-drive setups).
+3. Validate it's a `POSTROOM_INSTALL` record with the required fields.
+4. Banner the install info, ask for confirmation.
+5. `rednet.lookup` the registry station, then call `consume_install_token` HMAC-keyed on the install token itself (the new computer has no shared secret yet — the token IS the bootstrap key).
+6. On success the registry returns `shared_secret`, `op_username`, and `op_initial_password`.
+7. Write `/postroom/secret`, `/postroom/config.txt`, and an initial `/postroom/state.txt` with the op account hashed and `must_change_password = true`, plus seeded `pm`/`abuse`/`noreply` system accounts.
+8. Write `/startup.lua` that launches `/postroom/domain_srv.lua` on every boot.
+9. Display the temp op password loud and red — instruct the operator to write it down. Offer to reboot.
+
+After reboot the domain server runs as a normal mail server federating with the registry. From that point on the lifecycle is identical to the public servers (heartbeats, route_mail, deliver_mail, lifecycle notices).
+
+Tests: `tests/install_test.lua` (29 assertions) — pure helpers (`buildConfig`, `buildInitialState`, `buildStartup`, `verifySources`) verified for shape, plus module load smoke checks. The interactive parts (rednet lookup, floppy read, reboot) are tested end-to-end in CraftOS-PC.
 
 ### Batch 6: `src/nna_staff.lua` — Staff terminal (~500 lines)
 
