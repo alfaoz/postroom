@@ -511,6 +511,85 @@ local function todayTransactions(staffSecret)
   C.pause()
 end
 
+local function resetOpPassword(staffSecret)
+  header("Reset Op Password (Admin Only)")
+  if not M.session.is_admin then
+    err("Admin privileges required.")
+    C.pause(); return
+  end
+  local domain = string.lower(C.askNonEmpty("Domain"))
+  if not C.askYN("Generate a fresh temp password for op@" .. domain .. "?", true) then
+    warn("Cancelled."); C.pause(); return
+  end
+  local data, e = callREG("reset_op_password",
+    { session_token = M.session.token, domain_name = domain }, staffSecret)
+  if not data then err("Failed: " .. tostring(e)); C.pause(); return end
+  ok("Password reset.")
+  print("")
+  print("  Op account:  " .. data.op_username .. "@" .. domain)
+  C.printColored("yellow", "  New password: " .. data.new_password)
+  C.printColored("red",    "  *** WRITE THIS DOWN ***")
+  if not data.delivery_ok then
+    warn("Server delivery failed: " .. tostring(data.delivery_error))
+    warn("The password was generated but the mail server didn't acknowledge.")
+    warn("If the server is offline, retry after it comes back up.")
+  end
+  printOnPaper("Op pw reset @" .. domain, {
+    "OP PASSWORD RESET",
+    "-----------------",
+    "",
+    "  @" .. domain,
+    "  Day: " .. tostring(C.currentDay()),
+    "  Op account:  " .. data.op_username .. "@" .. domain,
+    "  Temp pw:     " .. data.new_password,
+    "",
+    "  *** Op must change this password on first login ***",
+    "",
+    "  Issued by: " .. M.session.username,
+  })
+  C.pause()
+end
+
+local function purgeRevokedDomain(staffSecret)
+  header("Purge Revoked Domain (Admin Only)")
+  if not M.session.is_admin then
+    err("Admin privileges required.")
+    C.pause(); return
+  end
+  local domain = string.lower(C.askNonEmpty("Domain to purge"))
+  if not C.confirmDanger("This permanently deletes the @" .. domain ..
+                         " record. The name returns to the pool.") then
+    warn("Cancelled."); C.pause(); return
+  end
+  local data, e = callREG("purge_domain",
+    { session_token = M.session.token, domain_name = domain }, staffSecret)
+  if not data then err("Failed: " .. tostring(e)); C.pause(); return end
+  ok("Purged. @" .. domain .. " is available for re-registration.")
+  C.pause()
+end
+
+local function forceTick(staffSecret)
+  header("Force Lifecycle Tick (Admin Only)")
+  if not M.session.is_admin then
+    err("Admin privileges required.")
+    C.pause(); return
+  end
+  if not C.askYN("Run the daily tick now? (Useful after /time set jumps.)", true) then
+    warn("Cancelled."); C.pause(); return
+  end
+  local data, e = callREG("force_tick",
+    { session_token = M.session.token }, staffSecret)
+  if not data then err("Failed: " .. tostring(e)); C.pause(); return end
+  ok(("Tick run for day %d."):format(data.day))
+  if #data.changes == 0 then
+    dim("No status changes.")
+  else
+    info("Status changes:")
+    for _, c in ipairs(data.changes) do print("  " .. c) end
+  end
+  C.pause()
+end
+
 local function viewAuditLog(staffSecret)
   header("Audit Log")
   io.write("Since day (blank = all): ")
@@ -553,19 +632,25 @@ local function mainMenu(staffSecret)
     print(" 6. Revoke domain (admin)")
     print(" 7. Today's activity")
     print(" 8. Audit log")
+    print(" 9. Reset op password (admin)")
+    print("10. Purge revoked domain (admin)")
+    print("11. Force lifecycle tick (admin)")
     print("")
     print(" 0. End shift (logout)")
     print("")
     local n = C.askNumber("Pick", 0)
-    if     n == 1 then newRegistration(staffSecret)
-    elseif n == 2 then processRenewal(staffSecret)
-    elseif n == 3 then processTransfer(staffSecret)
-    elseif n == 4 then lookupDomain(staffSecret)
-    elseif n == 5 then browseAll(staffSecret)
-    elseif n == 6 then revokeDomain(staffSecret)
-    elseif n == 7 then todayTransactions(staffSecret)
-    elseif n == 8 then viewAuditLog(staffSecret)
-    elseif n == 0 then
+    if     n == 1  then newRegistration(staffSecret)
+    elseif n == 2  then processRenewal(staffSecret)
+    elseif n == 3  then processTransfer(staffSecret)
+    elseif n == 4  then lookupDomain(staffSecret)
+    elseif n == 5  then browseAll(staffSecret)
+    elseif n == 6  then revokeDomain(staffSecret)
+    elseif n == 7  then todayTransactions(staffSecret)
+    elseif n == 8  then viewAuditLog(staffSecret)
+    elseif n == 9  then resetOpPassword(staffSecret)
+    elseif n == 10 then purgeRevokedDomain(staffSecret)
+    elseif n == 11 then forceTick(staffSecret)
+    elseif n == 0  then
       staffLogout(staffSecret)
       ok("Shift ended."); C.pause()
       return

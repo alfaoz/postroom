@@ -784,6 +784,90 @@ handlers.audit_query = function(payload, ctx)
   return true, { entries = out }
 end
 
+-- Admin: reset the op@<domain> password. Generates a fresh temp password,
+-- pushes it to the mail server via admin_op_reset, returns it to the staff
+-- terminal for printing on a slip.
+handlers.reset_op_password = function(payload, ctx)
+  if ctx.kind ~= "STAFF_TERMINAL" then return false, "AUTH_FAILED" end
+  local s, err = M.checkStaffSession(payload.session_token)
+  if not s then return false, err end
+  if not s.is_admin then return false, "INSUFFICIENT_PERMISSIONS" end
+
+  local name = string.lower(C.trim(payload.domain_name or ""))
+  local d = M.state.domains[name]
+  if not d then return false, "UNKNOWN_DOMAIN" end
+  if d.status == "REVOKED" then return false, "DOMAIN_REVOKED" end
+  if not d.server_id or not d.shared_secret then return false, "DOMAIN_OFFLINE" end
+
+  local newPw = crypto.formatToken(crypto.randomToken(16))
+  local opUser = d.owner_username or "op"
+  local hash = crypto.hashPassword(name, opUser, newPw)
+
+  local _, derr
+  if rednet then
+    _, derr = wire.sendRequest(d.server_id, M.STATION, "POSTROOM/REG",
+      "admin_op_reset",
+      { domain = name, new_password_hash = hash },
+      d.shared_secret, M.SEND_TIMEOUT_SEC)
+  else
+    derr = "rednet_unavailable"
+  end
+
+  audit("STAFF:" .. s.username, "RESET_OP_PASSWORD", name,
+        "delivery=" .. (derr and "FAILED:" .. tostring(derr) or "OK"))
+  M.saveState()
+  return true, {
+    op_username    = opUser,
+    new_password   = newPw,
+    delivery_ok    = (derr == nil),
+    delivery_error = derr,
+  }
+end
+
+-- Admin: immediately purge a REVOKED domain record so the name returns to
+-- the pool without waiting the full 60-day cooldown.
+handlers.purge_domain = function(payload, ctx)
+  if ctx.kind ~= "STAFF_TERMINAL" then return false, "AUTH_FAILED" end
+  local s, err = M.checkStaffSession(payload.session_token)
+  if not s then return false, err end
+  if not s.is_admin then return false, "INSUFFICIENT_PERMISSIONS" end
+
+  local name = string.lower(C.trim(payload.domain_name or ""))
+  local d = M.state.domains[name]
+  if not d then return false, "UNKNOWN_DOMAIN" end
+  if d.status ~= "REVOKED" then return false, "DOMAIN_NOT_REVOKED" end
+
+  M.state.domains[name] = nil
+  audit("STAFF:" .. s.username, "PURGE_DOMAIN", name, "manual purge")
+  M.saveState()
+  return true, { ok = true }
+end
+
+-- Admin: run the daily lifecycle tick on demand. Useful when /time set
+-- or other day-skipping leaves domains in a stale state.
+handlers.force_tick = function(payload, ctx)
+  if ctx.kind ~= "STAFF_TERMINAL" then return false, "AUTH_FAILED" end
+  local s, err = M.checkStaffSession(payload.session_token)
+  if not s then return false, err end
+  if not s.is_admin then return false, "INSUFFICIENT_PERMISSIONS" end
+
+  local before = {}
+  for n, d in pairs(M.state.domains) do before[n] = d.status end
+  M.dailyTick(true)
+  local changes = {}
+  for n, d in pairs(M.state.domains) do
+    if before[n] and before[n] ~= d.status then
+      changes[#changes + 1] = ("@%s: %s -> %s"):format(n, before[n], d.status)
+    end
+  end
+  audit("STAFF:" .. s.username, "FORCE_TICK", "registry",
+        "day=" .. C.currentDay() .. " changes=" .. #changes)
+  return true, {
+    day     = C.currentDay(),
+    changes = changes,
+  }
+end
+
 -- Public actions ------------------------------------------------------------
 
 handlers.domain_status = function(payload, ctx)

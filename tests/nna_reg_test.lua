@@ -293,6 +293,97 @@ local ok, err = R.dispatch(req)
 check("revoke: non-admin rejected", false, ok)
 check("revoke: => INSUFFICIENT_PERMISSIONS", "INSUFFICIENT_PERMISSIONS", err)
 
+-- ===== reset_op_password / purge_domain / force_tick =====
+
+freshState()
+local _, dat = staffLogin()
+local adminTok = dat.session_token
+
+-- Set up an ACTIVE domain we can reset op for
+R.state.domains["sundown"] = {
+  name = "sundown", owner_username = "barkeep",
+  status = "ACTIVE", expires_day = 999,
+  shared_secret = "S", server_id = 47,
+  last_heartbeat_at = C.now(),
+}
+
+-- reset_op_password (rednet unavailable in tests, so delivery_ok=false)
+local req = build("NNA_STAFF", "reset_op_password",
+  { session_token = adminTok, domain_name = "sundown" }, STAFF_SECRET)
+local ok, data = R.dispatch(req)
+check("reset_op_password: ok",          true,         ok)
+check("reset_op_password: returns op",  "barkeep",    data.op_username)
+checkTrue("reset_op_password: returns 19-char formatted token",
+  type(data.new_password) == "string" and #data.new_password == 19)
+check("reset_op_password: delivery flagged (no rednet)",
+  false, data.delivery_ok)
+
+-- non-admin staff can't reset
+freshState()
+ensureAdmin()
+R.state.staff_accounts["clerk"] = { username = "clerk",
+  password_hash = crypto.hashPassword("nna", "clerk", "passpass"),
+  active = true, is_admin = false, display_name = "Clerk", added_day = 1 }
+local req = build("NNA_STAFF", "staff_login",
+  { username = "clerk", password_hash =
+    crypto.hashPassword("nna", "clerk", "passpass"),
+    terminal_computer_id = 1 }, STAFF_SECRET)
+local _, dd = R.dispatch(req)
+local clerkTok = dd.session_token
+R.state.domains["sundown"] = {
+  name = "sundown", owner_username = "barkeep",
+  status = "ACTIVE", expires_day = 999, shared_secret = "S", server_id = 47,
+  last_heartbeat_at = C.now(),
+}
+local req = build("NNA_STAFF", "reset_op_password",
+  { session_token = clerkTok, domain_name = "sundown" }, STAFF_SECRET)
+local ok, err = R.dispatch(req)
+check("reset_op_password: non-admin rejected", false, ok)
+check("reset_op_password: non-admin => INSUFFICIENT_PERMISSIONS",
+      "INSUFFICIENT_PERMISSIONS", err)
+
+-- purge_domain
+freshState()
+local _, dat = staffLogin()
+local adminTok = dat.session_token
+R.state.domains["zombie"] = {
+  name = "zombie", status = "REVOKED", revoked_day = 100, expires_day = 50,
+}
+local req = build("NNA_STAFF", "purge_domain",
+  { session_token = adminTok, domain_name = "zombie" }, STAFF_SECRET)
+local ok = R.dispatch(req)
+check("purge_domain: ok", true, ok)
+check("purge_domain: removed", nil, R.state.domains["zombie"])
+
+-- can't purge non-revoked
+R.state.domains["alive"] = { name = "alive", status = "ACTIVE", expires_day = 999 }
+local req = build("NNA_STAFF", "purge_domain",
+  { session_token = adminTok, domain_name = "alive" }, STAFF_SECRET)
+local ok, err = R.dispatch(req)
+check("purge_domain: ACTIVE rejected", false, ok)
+check("purge_domain: ACTIVE => DOMAIN_NOT_REVOKED",
+      "DOMAIN_NOT_REVOKED", err)
+
+-- force_tick: set up a stale ACTIVE domain past expiry, force tick, expect transition
+freshState()
+local _, dat = staffLogin()
+local adminTok = dat.session_token
+local origDay = C.currentDay
+C.currentDay = function() return 100 end
+R.state.domains["stale"] = {
+  name = "stale", status = "ACTIVE", expires_day = 50,  -- 50 days past
+  shared_secret = "S", server_id = 1,
+}
+local req = build("NNA_STAFF", "force_tick",
+  { session_token = adminTok }, STAFF_SECRET)
+local ok, data = R.dispatch(req)
+check("force_tick: ok", true, ok)
+check("force_tick: domain transitioned", "REVOKED",
+      R.state.domains["stale"].status)
+checkTrue("force_tick: changes reported",
+  type(data.changes) == "table" and #data.changes >= 1)
+C.currentDay = origDay
+
 -- ===== daily tick =====
 
 freshState()
